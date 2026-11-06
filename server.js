@@ -400,25 +400,43 @@ app.get('/api/qrcode/poll', async (req, res) => {
   if (!key || key !== qrSession.key || Date.now() - qrSession.createdAt > 180000) {
     return res.json({ ok: false, code: 86038, message: '二维码已失效，请刷新' });
   }
-  try {
-    const r = await fetch(
-      `https://passport.bilibili.com/x/passport-login/web/qrcode/poll?qrcode_key=${encodeURIComponent(key)}`,
-      { headers: { 'User-Agent': UA, Referer: BILI_REFERER }, signal: AbortSignal.timeout(12000) }
-    ).then((x) => x.json());
-    const d = r.data || {};
-    if (r.code === 0 && d.code === 0 && d.url) {
-      const sess = new URL(d.url).searchParams.get('SESSDATA');
-      if (!sess) throw new Error('未获取到登录凭证');
-      sessdata = sess;
-      playurlCache.clear();
-      qrSession.key = '';
-      return res.json({ ok: true, code: 0 });
+  const pollUrl =
+    'https://passport.bilibili.com/x/passport-login/web/qrcode/poll?qrcode_key=' +
+    encodeURIComponent(key);
+  let r = null;
+  for (let i = 0; i < 2 && !r; i++) {
+    try {
+      const resp = await fetch(pollUrl, {
+        headers: { 'User-Agent': UA, Referer: BILI_REFERER },
+        signal: AbortSignal.timeout(12000)
+      });
+      r = await resp.json();
+    } catch (err) {
+      console.log('[qr] poll 请求失败:', err.message);
     }
-    // 86101=未扫码 86090=已扫未确认 86038=已失效
-    res.json({ ok: true, code: d.code ?? -1, message: d.message || '' });
-  } catch {
-    res.status(502).json({ ok: false, message: '轮询失败，请稍后再试' });
   }
+  if (!r) return res.status(502).json({ ok: false, message: '轮询失败，请稍后再试' });
+
+  const d = r.data || {};
+  console.log('[qr] poll code:', r.code, 'data.code:', d.code);
+  // 86101=未扫码 86090=已扫未确认 86038=已失效 0=已确认
+  if (d.code === 0 && d.url) {
+    let sess = '';
+    try {
+      sess = new URL(d.url).searchParams.get('SESSDATA') || '';
+    } catch {}
+    if (!sess) {
+      const m = /SESSDATA=([^&]+)/.exec(d.url);
+      if (m) sess = decodeURIComponent(m[1]);
+    }
+    if (!sess) return res.status(502).json({ ok: false, message: '未获取到登录凭证' });
+    sessdata = sess;
+    playurlCache.clear();
+    qrSession.key = '';
+    console.log('[qr] 扫码登录成功');
+    return res.json({ ok: true, code: 0 });
+  }
+  res.json({ ok: true, code: d.code ?? -1, message: d.message || '' });
 });
 
 app.post('/api/parse', async (req, res) => {

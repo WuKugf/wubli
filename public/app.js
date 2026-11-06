@@ -591,6 +591,7 @@ function closeSettings() {
 // ---------- 扫码登录 ----------
 let qrTimer = null;
 let qrKey = '';
+let qrFailCount = 0;
 
 function stopQrLogin() {
   if (qrTimer) {
@@ -606,13 +607,14 @@ async function startQrLogin() {
   els.qrStatus.textContent = '正在获取二维码…';
   els.qrRefresh.hidden = true;
   stopQrLogin();
+  qrFailCount = 0;
   try {
     const data = await api('/api/qrcode');
     qrKey = data.key;
     els.qrImg.src =
       'https://api.qrserver.com/v1/create-qr-code/?size=180x180&margin=8&data=' +
       encodeURIComponent(data.url);
-    els.qrStatus.textContent = '请使用 B 站 App 扫码';
+    els.qrStatus.textContent = '打开手机「哔哩哔哩」App → 我的 → 扫一扫';
     qrTimer = setInterval(pollQr, 2000);
   } catch (err) {
     els.qrStatus.textContent = err.message;
@@ -624,6 +626,7 @@ async function startQrLogin() {
 async function pollQr() {
   try {
     const d = await fetch(`/api/qrcode/poll?key=${encodeURIComponent(qrKey)}`).then((r) => r.json());
+    qrFailCount = 0;
     if (d.ok && d.code === 0) {
       stopQrLogin();
       els.qrBox.hidden = true;
@@ -644,9 +647,12 @@ async function pollQr() {
       els.qrStatus.textContent = '二维码已过期';
       els.qrRefresh.hidden = false;
       els.qrRefresh.textContent = '刷新二维码';
+    } else if (!d.ok && d.message) {
+      els.qrStatus.textContent = d.message;
     }
   } catch {
-    /* 单次轮询失败，下一轮重试 */
+    qrFailCount++;
+    if (qrFailCount >= 3) els.qrStatus.textContent = '网络异常，仍在重试…';
   }
 }
 
@@ -762,11 +768,20 @@ document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape' && !els.modal.hidden) closeSettings();
 });
 
-els.saveSettings.addEventListener('click', () => saveSettings(els.sessdata.value.trim()));
+function submitSessdata() {
+  const value = els.sessdata.value.trim();
+  if (!value) {
+    toast('未填写 SESSDATA，未做任何修改；如要退出登录请点「退出登录」');
+    return;
+  }
+  saveSettings(value);
+}
+
+els.saveSettings.addEventListener('click', submitSessdata);
 els.sessdata.addEventListener('keydown', (e) => {
   if (e.key === 'Enter') {
     e.preventDefault();
-    saveSettings(els.sessdata.value.trim());
+    submitSessdata();
   }
 });
 els.logoutBtn.addEventListener('click', () => saveSettings(''));
