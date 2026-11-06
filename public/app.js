@@ -25,6 +25,14 @@ const els = {
   qrStatus: document.getElementById('qrStatus'),
   qrRefresh: document.getElementById('qrRefresh'),
   ffmpegState: document.getElementById('ffmpegState'),
+  meModal: document.getElementById('meModal'),
+  meClose: document.getElementById('meClose'),
+  meFace: document.getElementById('meFace'),
+  meName: document.getElementById('meName'),
+  meMeta: document.getElementById('meMeta'),
+  meRefresh: document.getElementById('meRefresh'),
+  meTabs: document.getElementById('meTabs'),
+  meBody: document.getElementById('meBody'),
   toast: document.getElementById('toast')
 };
 
@@ -571,7 +579,8 @@ async function refreshSettings() {
   try {
     const data = await fetch('/api/settings').then((r) => r.json());
     state.loggedIn = !!data.loggedIn;
-    updateLoginUI();
+    state.uname = data.uname || '';
+    updateLoginUI(state.uname);
     els.ffmpegState.textContent = data.hasFFmpeg ? 'ffmpeg 已就绪' : '未检测到 ffmpeg，将下载无声视频';
   } catch {
     els.ffmpegState.textContent = '';
@@ -632,6 +641,7 @@ async function pollQr() {
       els.qrBox.hidden = true;
       els.qrToggle.hidden = false;
       state.loggedIn = true;
+      resetMeState();
       closeSettings();
       toast('扫码登录成功');
       refreshSettings();
@@ -671,6 +681,8 @@ async function saveSettings(value) {
     updateLoginUI(data.uname);
     toast(data.loggedIn ? `登录成功${data.uname ? `，欢迎 ${data.uname}` : ''}` : '已切换为游客模式');
     closeSettings();
+    resetMeState();
+    closeMe();
     els.sessdata.value = '';
     state.cards.forEach((card) => {
       if (card.qualities.length) loadQualities(card);
@@ -682,6 +694,261 @@ async function saveSettings(value) {
     label.textContent = original;
   }
 }
+
+// ---------- 个人中心 ----------
+const meState = {
+  profile: null,
+  tab: 'fav',
+  folders: null,
+  folderId: '',
+  folderTitle: '',
+  folderPn: 1,
+  folderHasMore: false,
+  folderItems: [],
+  currentBvids: [],
+  lists: { later: null, history: null }
+};
+
+function resetMeState() {
+  meState.profile = null;
+  meState.folders = null;
+  meState.folderItems = [];
+  meState.currentBvids = [];
+  meState.lists.later = null;
+  meState.lists.history = null;
+}
+
+function openMe() {
+  els.meModal.hidden = false;
+  els.meBody.innerHTML = '<div class="me-loading">加载中…</div>';
+  loadMeProfile();
+  loadMeTab(meState.tab);
+}
+
+function closeMe() {
+  els.meModal.hidden = true;
+}
+
+function handleMeError(err) {
+  if (/登录|401/.test(err.message)) {
+    state.loggedIn = false;
+    updateLoginUI();
+    resetMeState();
+  }
+}
+
+async function loadMeProfile(force = false) {
+  if (meState.profile && !force) {
+    renderMeProfile();
+    return;
+  }
+  try {
+    const data = await api('/api/me');
+    meState.profile = data.profile;
+    renderMeProfile();
+  } catch (err) {
+    handleMeError(err);
+    els.meName.textContent = '获取失败';
+    els.meMeta.textContent = err.message;
+  }
+}
+
+function renderMeProfile() {
+  const p = meState.profile;
+  if (!p) return;
+  if (p.face) {
+    els.meFace.src = p.face;
+    els.meFace.hidden = false;
+  } else {
+    els.meFace.hidden = true;
+  }
+  els.meName.textContent = p.uname;
+  els.meMeta.textContent =
+    `LV${p.level} · 硬币 ${p.money} · UID ${p.mid}` + (p.vip ? ` · ${p.vip}` : '');
+}
+
+function setMeTab(tab) {
+  meState.tab = tab;
+  els.meTabs.querySelectorAll('button').forEach((b) => {
+    b.classList.toggle('active', b.dataset.tab === tab);
+  });
+}
+
+async function loadMeTab(tab, force = false) {
+  setMeTab(tab);
+  els.meBody.innerHTML = '<div class="me-loading">加载中…</div>';
+  try {
+    if (tab === 'fav') {
+      if (force || !meState.folders) {
+        const data = await api('/api/me/favorites');
+        meState.folders = data.list;
+      }
+      renderFolderList();
+    } else {
+      if (force || !meState.lists[tab]) {
+        const data = await api(tab === 'later' ? '/api/me/watchlater' : '/api/me/history');
+        meState.lists[tab] = data.list;
+      }
+      renderMeVideoList(meState.lists[tab]);
+    }
+  } catch (err) {
+    handleMeError(err);
+    els.meBody.innerHTML = `
+      <div class="me-error">
+        <span>${escapeHtml(err.message)}</span>
+        <button class="ghost-btn small" type="button" data-action="retry">重试</button>
+      </div>`;
+  }
+}
+
+function renderFolderList() {
+  if (!meState.folders.length) {
+    els.meBody.innerHTML = '<div class="me-empty">还没有收藏夹</div>';
+    return;
+  }
+  els.meBody.innerHTML = `
+    <div class="me-folders">
+      ${meState.folders.map((f) => `
+        <button class="me-folder" type="button" data-action="folder" data-id="${f.id}" data-title="${escapeHtml(f.title)}">
+          <span class="folder-name">${escapeHtml(f.title)}</span>
+          <span class="folder-count">${f.count} 个视频 →</span>
+        </button>`).join('')}
+    </div>`;
+}
+
+async function openFolder(id, title) {
+  meState.folderId = id;
+  meState.folderTitle = title;
+  meState.folderPn = 1;
+  meState.folderItems = [];
+  meState.folderHasMore = false;
+  els.meBody.innerHTML = '<div class="me-loading">加载中…</div>';
+  try {
+    await loadFolderPage();
+  } catch (err) {
+    handleMeError(err);
+    els.meBody.innerHTML = `
+      <div class="me-error">
+        <span>${escapeHtml(err.message)}</span>
+        <button class="ghost-btn small" type="button" data-action="retry-folder">重试</button>
+      </div>`;
+  }
+}
+
+async function loadFolderPage() {
+  const data = await api(`/api/me/favorites/${meState.folderId}?pn=${meState.folderPn}`);
+  meState.folderHasMore = !!data.hasMore;
+  meState.folderItems = meState.folderItems.concat(data.list);
+  renderFolderDetail();
+}
+
+function meBarHtml(leftHtml, count) {
+  return `
+    <div class="me-bar">
+      ${leftHtml}
+      <span class="me-bar-count">${count} 个视频</span>
+      <button class="primary-btn small" type="button" data-action="import-all" ${count ? '' : 'disabled'}>全部导入解析</button>
+    </div>`;
+}
+
+function meItemHtml(m) {
+  return `
+    <div class="me-item">
+      <div class="me-thumb">
+        ${m.cover ? `<img src="${escapeHtml(m.cover)}" alt="" loading="lazy" referrerpolicy="no-referrer" />` : ''}
+        <span class="me-dur">${fmtDuration(m.duration)}</span>
+      </div>
+      <div class="me-info">
+        <div class="me-title" title="${escapeHtml(m.title)}">${escapeHtml(m.title)}</div>
+        <div class="me-sub">${escapeHtml(m.author || '')} · ${escapeHtml(m.bvid)}</div>
+      </div>
+      <button class="ghost-btn small" type="button" data-action="import" data-bvid="${escapeHtml(m.bvid)}">导入</button>
+    </div>`;
+}
+
+function renderFolderDetail() {
+  const items = meState.folderItems.filter((m) => m.bvid);
+  meState.currentBvids = items.map((m) => m.bvid);
+  els.meBody.innerHTML = `
+    ${meBarHtml(
+      `<button class="ghost-btn small" type="button" data-action="back-folders">← 收藏夹</button>` +
+      `<span class="me-bar-title">${escapeHtml(meState.folderTitle)}</span>`,
+      items.length
+    )}
+    <div class="me-list">${items.map(meItemHtml).join('') || '<div class="me-empty">该收藏夹暂无视频</div>'}</div>
+    ${meState.folderHasMore ? '<button class="ghost-btn me-more" type="button" data-action="more">加载更多</button>' : ''}`;
+}
+
+function renderMeVideoList(list) {
+  const items = list.filter((m) => m.bvid);
+  meState.currentBvids = items.map((m) => m.bvid);
+  els.meBody.innerHTML = `
+    ${meBarHtml('', items.length)}
+    <div class="me-list">${items.map(meItemHtml).join('') || '<div class="me-empty">暂无记录</div>'}</div>`;
+}
+
+function importBvids(bvids, mode) {
+  const list = (bvids || []).filter(Boolean);
+  if (!list.length) {
+    toast('没有可导入的视频', true);
+    return;
+  }
+  if (mode === 'append') {
+    const existing = els.input.value.trim();
+    els.input.value = existing ? `${existing}\n${list[0]}` : list[0];
+  } else {
+    els.input.value = list.slice(0, 20).join('\n');
+    if (list.length > 20) toast(`已导入前 20 条（共 ${list.length} 条）`);
+  }
+  updateInputCount();
+  closeMe();
+  parse();
+}
+
+els.meBody.addEventListener('click', async (e) => {
+  const btn = e.target.closest('[data-action]');
+  if (!btn) return;
+  const action = btn.dataset.action;
+  if (action === 'folder') {
+    openFolder(btn.dataset.id, btn.dataset.title);
+  } else if (action === 'back-folders') {
+    loadMeTab('fav');
+  } else if (action === 'more') {
+    meState.folderPn += 1;
+    btn.disabled = true;
+    btn.textContent = '加载中…';
+    try {
+      await loadFolderPage();
+    } catch (err) {
+      toast(err.message, true);
+      renderFolderDetail();
+    }
+  } else if (action === 'import') {
+    importBvids([btn.dataset.bvid], 'append');
+  } else if (action === 'import-all') {
+    importBvids(meState.currentBvids, 'replace');
+  } else if (action === 'retry') {
+    loadMeTab(meState.tab, true);
+  } else if (action === 'retry-folder') {
+    openFolder(meState.folderId, meState.folderTitle);
+  }
+});
+
+els.meTabs.addEventListener('click', (e) => {
+  const btn = e.target.closest('button[data-tab]');
+  if (!btn || btn.dataset.tab === meState.tab) return;
+  loadMeTab(btn.dataset.tab);
+});
+
+els.meRefresh.addEventListener('click', () => {
+  loadMeProfile(true);
+  loadMeTab(meState.tab, true);
+});
+
+els.meClose.addEventListener('click', closeMe);
+els.meModal.addEventListener('click', (e) => {
+  if (e.target === els.meModal) closeMe();
+});
 
 // ---------- 事件绑定 ----------
 
@@ -759,13 +1026,18 @@ els.cards.addEventListener('click', (e) => {
 });
 
 els.settingsBtn.addEventListener('click', openSettings);
-els.loginPill.addEventListener('click', openSettings);
+els.loginPill.addEventListener('click', () => {
+  if (state.loggedIn) openMe();
+  else openSettings();
+});
 els.modalClose.addEventListener('click', closeSettings);
 els.modal.addEventListener('click', (e) => {
   if (e.target === els.modal) closeSettings();
 });
 document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape' && !els.modal.hidden) closeSettings();
+  if (e.key !== 'Escape') return;
+  if (!els.modal.hidden) closeSettings();
+  if (!els.meModal.hidden) closeMe();
 });
 
 function submitSessdata() {

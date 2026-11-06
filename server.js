@@ -348,8 +348,15 @@ function streamUrl(data, qn) {
 // ---------- 路由 ----------
 app.use(express.json({ limit: '1mb' }));
 
-app.get('/api/settings', (req, res) => {
-  res.json({ loggedIn: !!sessdata, hasFFmpeg });
+app.get('/api/settings', async (req, res) => {
+  let uname = '';
+  if (sessdata) {
+    try {
+      const nav = await biliGet('https://api.bilibili.com/x/web-interface/nav', 8000);
+      if (nav && nav.isLogin) uname = nav.uname || '';
+    } catch {}
+  }
+  res.json({ loggedIn: !!sessdata, hasFFmpeg, uname });
 });
 
 app.post('/api/settings', async (req, res) => {
@@ -448,6 +455,126 @@ app.get('/api/qrcode/poll', async (req, res) => {
     return res.json({ ok: true, code: 0 });
   }
   res.json({ ok: true, code: d.code ?? -1, message: d.message || '' });
+});
+
+// ---------- 个人中心（需要登录） ----------
+function requireLogin(res) {
+  if (sessdata) return true;
+  res.status(401).json({ ok: false, message: '未登录，请先扫码登录' });
+  return false;
+}
+
+async function fetchLoginNav() {
+  const data = await biliGet('https://api.bilibili.com/x/web-interface/nav');
+  if (!data || !data.isLogin) throw new BiliError(-101);
+  return data;
+}
+
+function sendMeError(res, err) {
+  const unauth = err.code === -101 || err.code === -104;
+  res.status(unauth ? 401 : 400).json({ ok: false, message: err.message || '获取失败' });
+}
+
+app.get('/api/me', async (req, res) => {
+  if (!requireLogin(res)) return;
+  try {
+    const d = await fetchLoginNav();
+    res.json({
+      ok: true,
+      profile: {
+        mid: d.mid,
+        uname: d.uname,
+        face: coverProxyUrl(d.face),
+        level: (d.level_info && d.level_info.current_level) || 0,
+        money: d.money || 0,
+        vip: d.vipStatus === 1 && d.vip_label && d.vip_label.text ? d.vip_label.text : ''
+      }
+    });
+  } catch (err) {
+    sendMeError(res, err);
+  }
+});
+
+app.get('/api/me/favorites', async (req, res) => {
+  if (!requireLogin(res)) return;
+  try {
+    const nav = await fetchLoginNav();
+    const data = await biliGet(
+      `https://api.bilibili.com/x/v3/fav/folder/created/list-all?up_mid=${nav.mid}&type=2`
+    );
+    const list = ((data && data.list) || []).map((f) => ({
+      id: f.id,
+      title: f.title,
+      count: f.media_count || 0
+    }));
+    res.json({ ok: true, list });
+  } catch (err) {
+    sendMeError(res, err);
+  }
+});
+
+app.get('/api/me/favorites/:id', async (req, res) => {
+  if (!requireLogin(res)) return;
+  const id = String(req.params.id || '');
+  if (!/^\d+$/.test(id)) return res.status(400).json({ ok: false, message: '参数不合法' });
+  const pn = Math.min(Math.max(Number(req.query.pn) || 1, 1), 50);
+  try {
+    const data = await biliGet(
+      `https://api.bilibili.com/x/v3/fav/resource/list?media_id=${id}&ps=40&pn=${pn}&platform=web`
+    );
+    const list = ((data && data.medias) || [])
+      .filter((m) => m.bvid && m.attr === 0)
+      .map((m) => ({
+        bvid: m.bvid,
+        title: m.title,
+        cover: coverProxyUrl(m.cover),
+        duration: m.duration || 0,
+        author: (m.upper && m.upper.name) || ''
+      }));
+    res.json({ ok: true, list, hasMore: !!(data && data.has_more) });
+  } catch (err) {
+    sendMeError(res, err);
+  }
+});
+
+app.get('/api/me/watchlater', async (req, res) => {
+  if (!requireLogin(res)) return;
+  try {
+    const data = await biliGet('https://api.bilibili.com/x/v2/history/toview');
+    const list = ((data && data.list) || [])
+      .filter((m) => m.bvid)
+      .map((m) => ({
+        bvid: m.bvid,
+        title: m.title,
+        cover: coverProxyUrl(m.pic),
+        duration: m.duration || 0,
+        author: (m.owner && m.owner.name) || ''
+      }));
+    res.json({ ok: true, list });
+  } catch (err) {
+    sendMeError(res, err);
+  }
+});
+
+app.get('/api/me/history', async (req, res) => {
+  if (!requireLogin(res)) return;
+  try {
+    const data = await biliGet(
+      'https://api.bilibili.com/x/web-interface/history/cursor?ps=30&type=archive'
+    );
+    const list = ((data && data.list) || [])
+      .filter((m) => m.history && m.history.bvid)
+      .map((m) => ({
+        bvid: m.history.bvid,
+        title: m.title,
+        cover: coverProxyUrl(m.cover || (Array.isArray(m.covers) ? m.covers[0] : '')),
+        duration: m.duration || 0,
+        author: m.author_name || ''
+      }));
+    res.json({ ok: true, list });
+  } catch (err) {
+    sendMeError(res, err);
+  }
 });
 
 app.post('/api/parse', async (req, res) => {
