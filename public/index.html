@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>wubli · B 站视频批量解析下载</title>
+  <meta name="description" content="wubli - 批量解析 B 站视频，选择画质，一键下载 MP4。" />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%23fb7299'/%3E%3Cstop offset='1' stop-color='%2338bdf8'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='64' height='64' rx='16' fill='url(%23g)'/%3E%3Cpath d='M26 20l18 12-18 12z' fill='white'/%3E%3C/svg%3E" />
+  <link rel="stylesheet" href="./styles.css?v=20261106a" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <div class="logo-mark" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none">
+          <path d="M9.5 8.2v7.6c0 .5.5.8.9.5l5.9-3.8a.6.6 0 0 0 0-1l-5.9-3.8a.6.6 0 0 0-.9.5z" fill="currentColor"/>
+        </svg>
+      </div>
+      <div class="brand-text">
+        <div class="brand-name">wubli</div>
+        <div class="brand-sub">BILIBILI BATCH DOWNLOADER</div>
+      </div>
+    </div>
+    <div class="top-actions">
+      <button class="login-pill" id="loginPill" type="button">
+        <span class="dot" id="loginDot"></span>
+        <span id="loginText">游客模式</span>
+      </button>
+      <button class="icon-btn" id="settingsBtn" type="button" aria-label="设置" title="设置">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
+          <circle cx="12" cy="12" r="3.2"/>
+          <path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.9 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1A1.7 1.7 0 0 0 4.7 9a1.7 1.7 0 0 0-.3-1.9l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.9.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.9-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.9V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>
+        </svg>
+      </button>
+    </div>
+  </header>
+
+  <main>
+    <section class="hero">
+      <div class="eyebrow"><span class="eyebrow-line"></span>BATCH · PARSE · DOWNLOAD</div>
+      <h1>批量解析，<span class="grad">一键下载</span></h1>
+      <p class="sub">粘贴多个 B 站视频链接，自动解析标题与分 P，按需选择清晰度，直接导出 MP4。</p>
+    </section>
+
+    <section class="panel input-panel">
+      <div class="input-wrap">
+        <textarea id="input" spellcheck="false" autocomplete="off" placeholder="每行一个链接，例如：&#10;https://www.bilibili.com/video/BV1GJ411x7h7&#10;BV1xx411c7mD  ·  https://b23.tv/xxxx  ·  av123456"></textarea>
+        <span class="input-count" id="inputCount">0 条</span>
+      </div>
+      <div class="toolbar">
+        <div class="toolbar-left">
+          <div class="quality-pref">
+            <span class="pref-label">默认画质</span>
+            <div class="segmented" id="prefGroup" role="group" aria-label="默认画质">
+              <button type="button" data-pref="max" class="active">最高</button>
+              <button type="button" data-pref="1080">1080P</button>
+              <button type="button" data-pref="720">720P</button>
+              <button type="button" data-pref="480">480P</button>
+            </div>
+          </div>
+          <div class="hint">支持视频链接 / BV 号 / av 号 / b23.tv 短链，单次最多 20 条</div>
+        </div>
+        <div class="toolbar-right">
+          <button class="ghost-btn" id="clearBtn" type="button">清空</button>
+          <button class="primary-btn" id="parseBtn" type="button">
+            <span class="btn-label">开始解析</span>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M5 12h14M13 6l6 6-6 6"/>
+            </svg>
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <section class="results" id="results">
+      <div class="results-head">
+        <div class="results-title">解析结果 <span class="count-chip" id="resultCount" hidden>0</span></div>
+        <div class="results-meta" id="resultsMeta"></div>
+      </div>
+      <div class="grid" id="cards"></div>
+      <div class="empty" id="empty">
+        <svg viewBox="0 0 64 64" fill="none" aria-hidden="true">
+          <rect x="8" y="14" width="48" height="34" rx="7" stroke="currentColor" stroke-width="2.2" stroke-dasharray="6 5"/>
+          <path d="M27 25l11 7-11 7z" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round"/>
+        </svg>
+        <p>解析结果会出现在这里</p>
+        <span>支持批量粘贴，解析后可逐个选择画质下载</span>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <span>wubli · 仅供个人学习与离线观看</span>
+    <span class="footer-sep">·</span>
+    <span>请尊重 UP 主版权，勿用于商业传播</span>
+  </footer>
+
+  <div class="modal" id="settingsModal" hidden>
+    <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
+      <div class="modal-head">
+        <h2 id="settingsTitle">画质设置</h2>
+        <button class="icon-btn" id="modalClose" type="button" aria-label="关闭">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 6l12 12M18 6L6 18"/></svg>
+        </button>
+      </div>
+      <p class="modal-desc">未登录时 B 站仅开放 480P 及以下画质。填入浏览器中的 <code>SESSDATA</code> Cookie 后可解锁 1080P / 4K 等更高清晰度，仅保存在本机服务内存中。</p>
+      <label class="field-label" for="sessdata">SESSDATA</label>
+      <input id="sessdata" type="password" placeholder="粘贴 SESSDATA 值，留空则退出登录" autocomplete="off" spellcheck="false" />
+      <details class="guide" id="sessdataGuide">
+        <summary>不会获取？点击查看图文教程（约 1 分钟）</summary>
+        <ol class="guide-steps">
+          <li>用电脑浏览器（Chrome / Edge）打开 <b>bilibili.com</b>，先登录你的 B 站账号。</li>
+          <li>按键盘 <kbd>F12</kbd>（或右键页面空白处 →「检查」）打开开发者工具。</li>
+          <li>点顶部的 <b>Application</b>（应用）标签 → 左侧展开 <b>Cookies</b> → 点击 <b>https://www.bilibili.com</b>。<br /><span class="guide-sub">Edge 浏览器：左侧找「存储 → Cookie」。</span></li>
+          <li>在右侧列表中找到 <code>SESSDATA</code> 这一行，双击它 <b>Value</b>（值）那一列，全选复制。</li>
+          <li>回到本页，粘贴到上面的输入框，点「保存」即完成登录。</li>
+        </ol>
+        <p class="guide-note">提示：SESSDATA 有效期约 30 天，过期后重新按上面步骤获取即可。不登录也能正常使用，游客模式可下载 480P 及以下画质。</p>
+      </details>
+      <div class="modal-foot">
+        <span class="ffmpeg-state" id="ffmpegState"></span>
+        <div class="modal-btns">
+          <button class="ghost-btn" id="logoutBtn" type="button">退出登录</button>
+          <button class="primary-btn small" id="saveSettings" type="button"><span class="btn-label">保存</span></button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast" role="status"></div>
+
+  <script src="./app.js?v=20261101a"></script>
+</body>
+</html>
