@@ -404,12 +404,14 @@ app.get('/api/qrcode/poll', async (req, res) => {
     'https://passport.bilibili.com/x/passport-login/web/qrcode/poll?qrcode_key=' +
     encodeURIComponent(key);
   let r = null;
+  let setCookies = [];
   for (let i = 0; i < 2 && !r; i++) {
     try {
       const resp = await fetch(pollUrl, {
         headers: { 'User-Agent': UA, Referer: BILI_REFERER },
         signal: AbortSignal.timeout(12000)
       });
+      setCookies = typeof resp.headers.getSetCookie === 'function' ? resp.headers.getSetCookie() : [];
       r = await resp.json();
     } catch (err) {
       console.log('[qr] poll 请求失败:', err.message);
@@ -418,14 +420,23 @@ app.get('/api/qrcode/poll', async (req, res) => {
   if (!r) return res.status(502).json({ ok: false, message: '轮询失败，请稍后再试' });
 
   const d = r.data || {};
-  console.log('[qr] poll code:', r.code, 'data.code:', d.code);
+  console.log(
+    '[qr] poll code:', r.code, 'data.code:', d.code,
+    'url:', String(d.url || '').replace(/(SESSDATA=)[^&"]+/g, '$1***'),
+    'set-cookie:', setCookies.length
+  );
   // 86101=未扫码 86090=已扫未确认 86038=已失效 0=已确认
-  if (d.code === 0 && d.url) {
+  if (d.code === 0) {
+    // 凭证可能在 Set-Cookie 头里，也可能在 url 参数里，依次尝试
     let sess = '';
-    try {
-      sess = new URL(d.url).searchParams.get('SESSDATA') || '';
-    } catch {}
-    if (!sess) {
+    const cm = /SESSDATA=([^;]+)/.exec(setCookies.join('; '));
+    if (cm) sess = cm[1];
+    if (!sess && d.url) {
+      try {
+        sess = new URL(d.url).searchParams.get('SESSDATA') || '';
+      } catch {}
+    }
+    if (!sess && d.url) {
       const m = /SESSDATA=([^&]+)/.exec(d.url);
       if (m) sess = decodeURIComponent(m[1]);
     }
