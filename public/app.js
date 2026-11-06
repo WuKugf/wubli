@@ -19,6 +19,11 @@ const els = {
   sessdata: document.getElementById('sessdata'),
   saveSettings: document.getElementById('saveSettings'),
   logoutBtn: document.getElementById('logoutBtn'),
+  qrToggle: document.getElementById('qrToggle'),
+  qrBox: document.getElementById('qrBox'),
+  qrImg: document.getElementById('qrImg'),
+  qrStatus: document.getElementById('qrStatus'),
+  qrRefresh: document.getElementById('qrRefresh'),
   ffmpegState: document.getElementById('ffmpegState'),
   toast: document.getElementById('toast')
 };
@@ -580,6 +585,69 @@ function openSettings() {
 
 function closeSettings() {
   els.modal.hidden = true;
+  stopQrLogin();
+}
+
+// ---------- 扫码登录 ----------
+let qrTimer = null;
+let qrKey = '';
+
+function stopQrLogin() {
+  if (qrTimer) {
+    clearInterval(qrTimer);
+    qrTimer = null;
+  }
+}
+
+async function startQrLogin() {
+  els.qrBox.hidden = false;
+  els.qrToggle.hidden = true;
+  els.qrImg.removeAttribute('src');
+  els.qrStatus.textContent = '正在获取二维码…';
+  els.qrRefresh.hidden = true;
+  stopQrLogin();
+  try {
+    const data = await api('/api/qrcode');
+    qrKey = data.key;
+    els.qrImg.src =
+      'https://api.qrserver.com/v1/create-qr-code/?size=180x180&margin=8&data=' +
+      encodeURIComponent(data.url);
+    els.qrStatus.textContent = '请使用 B 站 App 扫码';
+    qrTimer = setInterval(pollQr, 2000);
+  } catch (err) {
+    els.qrStatus.textContent = err.message;
+    els.qrRefresh.hidden = false;
+    els.qrRefresh.textContent = '重试';
+  }
+}
+
+async function pollQr() {
+  try {
+    const d = await fetch(`/api/qrcode/poll?key=${encodeURIComponent(qrKey)}`).then((r) => r.json());
+    if (d.ok && d.code === 0) {
+      stopQrLogin();
+      els.qrBox.hidden = true;
+      els.qrToggle.hidden = false;
+      state.loggedIn = true;
+      closeSettings();
+      toast('扫码登录成功');
+      refreshSettings();
+      state.cards.forEach((card) => {
+        if (card.qualities.length) loadQualities(card);
+      });
+      return;
+    }
+    if (d.code === 86090) {
+      els.qrStatus.textContent = '已扫码，请在手机上点「确认登录」';
+    } else if (d.code === 86038) {
+      stopQrLogin();
+      els.qrStatus.textContent = '二维码已过期';
+      els.qrRefresh.hidden = false;
+      els.qrRefresh.textContent = '刷新二维码';
+    }
+  } catch {
+    /* 单次轮询失败，下一轮重试 */
+  }
 }
 
 async function saveSettings(value) {
@@ -702,6 +770,8 @@ els.sessdata.addEventListener('keydown', (e) => {
   }
 });
 els.logoutBtn.addEventListener('click', () => saveSettings(''));
+els.qrToggle.addEventListener('click', startQrLogin);
+els.qrRefresh.addEventListener('click', startQrLogin);
 
 // ---------- 初始化 ----------
 

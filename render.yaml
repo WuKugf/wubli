@@ -1,0 +1,9 @@
+services:
+  - type: web
+    name: wubli
+    runtime: docker
+    plan: free
+    healthCheckPath: /api/settings
+    envVars:
+      - key: PORT
+        value: 3200

@@ -378,6 +378,49 @@ app.post('/api/settings', async (req, res) => {
   }
 });
 
+// ---------- 扫码登录 ----------
+let qrSession = { key: '', createdAt: 0 };
+
+app.get('/api/qrcode', async (req, res) => {
+  try {
+    const r = await fetch('https://passport.bilibili.com/x/passport-login/web/qrcode/generate', {
+      headers: { 'User-Agent': UA, Referer: BILI_REFERER },
+      signal: AbortSignal.timeout(12000)
+    }).then((x) => x.json());
+    if (r.code !== 0 || !r.data?.qrcode_key) throw new Error(r.message || '生成失败');
+    qrSession = { key: r.data.qrcode_key, createdAt: Date.now() };
+    res.json({ ok: true, key: r.data.qrcode_key, url: r.data.url });
+  } catch (err) {
+    res.status(502).json({ ok: false, message: '获取二维码失败：' + (err.message || '网络错误') });
+  }
+});
+
+app.get('/api/qrcode/poll', async (req, res) => {
+  const key = String(req.query.key || '');
+  if (!key || key !== qrSession.key || Date.now() - qrSession.createdAt > 180000) {
+    return res.json({ ok: false, code: 86038, message: '二维码已失效，请刷新' });
+  }
+  try {
+    const r = await fetch(
+      `https://passport.bilibili.com/x/passport-login/web/qrcode/poll?qrcode_key=${encodeURIComponent(key)}`,
+      { headers: { 'User-Agent': UA, Referer: BILI_REFERER }, signal: AbortSignal.timeout(12000) }
+    ).then((x) => x.json());
+    const d = r.data || {};
+    if (r.code === 0 && d.code === 0 && d.url) {
+      const sess = new URL(d.url).searchParams.get('SESSDATA');
+      if (!sess) throw new Error('未获取到登录凭证');
+      sessdata = sess;
+      playurlCache.clear();
+      qrSession.key = '';
+      return res.json({ ok: true, code: 0 });
+    }
+    // 86101=未扫码 86090=已扫未确认 86038=已失效
+    res.json({ ok: true, code: d.code ?? -1, message: d.message || '' });
+  } catch {
+    res.status(502).json({ ok: false, message: '轮询失败，请稍后再试' });
+  }
+});
+
 app.post('/api/parse', async (req, res) => {
   const tokens = normalizeInput(req.body?.input);
   if (!tokens.length) {
