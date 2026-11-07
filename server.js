@@ -90,7 +90,15 @@ async function ensureCookies(force = false) {
   await cookiePromise;
 }
 
-const hasFFmpeg = spawnSync('ffmpeg', ['-version'], { stdio: 'ignore' }).status === 0;
+// 优先使用随依赖安装的 ffmpeg 静态二进制，系统未安装 ffmpeg 时也能合并音视频
+let ffmpegPath = 'ffmpeg';
+try {
+  const bundled = require('ffmpeg-static');
+  if (bundled) ffmpegPath = bundled;
+} catch {
+  // 未安装 ffmpeg-static 时回退到系统 PATH 中的 ffmpeg
+}
+const hasFFmpeg = spawnSync(ffmpegPath, ['-version'], { stdio: 'ignore' }).status === 0;
 
 class BiliError extends Error {
   constructor(code, message) {
@@ -694,7 +702,7 @@ async function ensureMp4(key, streams, ffHeaders) {
         '-movflags', '+faststart',
         '-f', 'mp4', part
       ];
-      const ff = spawn('ffmpeg', args);
+      const ff = spawn(ffmpegPath, args);
       ff.stderr.on('data', (buf) => {
         const text = String(buf).trim();
         if (text) console.warn('[ffmpeg]', text.slice(0, 300));
